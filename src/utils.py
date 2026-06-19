@@ -122,6 +122,30 @@ def format_currency(value: object) -> str:
     return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def parse_optional_number(value: object) -> float | None:
+    """Convierte un valor opcional a número, devolviendo None para vacíos o inválidos."""
+    if pd.isna(value):
+        return None
+    if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return parse_currency_amount(text)
+    except ValueError:
+        return None
+
+
+def format_percentage(value: object, decimals: int = 2) -> str:
+    """Formatea un ratio como porcentaje con separador decimal argentino."""
+    number = parse_optional_number(value)
+    if number is None:
+        return ""
+    formatted = f"{number * 100:.{decimals}f}%"
+    return formatted.replace(".", ",")
+
+
 def add_normalized_sku(df: pd.DataFrame, source_column: str = "SKU") -> pd.DataFrame:
     """Agrega la columna técnica _SKU_NORMALIZED sin mutar el DataFrame original."""
     result = df.copy()
