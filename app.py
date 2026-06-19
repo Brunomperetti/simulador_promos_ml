@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from src.exporter import export_mercado_libre_excel, has_modified_rows
 from src.loaders import load_mercado_libre_excel, load_tienda_nube_csv
 from src.transformers import (
     READ_ONLY_COLUMNS,
@@ -147,6 +148,21 @@ if not simulated_df.equals(edited_df) or only_modified:
         use_container_width=True,
         hide_index=True,
     )
+
+with st.container(border=True):
+    st.subheader("Exportación para Mercado Libre")
+    if not has_modified_rows(simulated_df):
+        st.warning("No hay publicaciones modificadas para exportar.")
+    try:
+        export_bytes = export_mercado_libre_excel(ml_file.getvalue(), simulated_df)
+        st.download_button(
+            "Descargar Excel para Mercado Libre",
+            data=export_bytes,
+            file_name="promociones_ml_actualizadas.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except Exception as exc:  # Streamlit debe informar problemas de exportación de forma amigable.
+        st.error(f"No se pudo generar el Excel final para Mercado Libre: {exc}")
 
 with st.expander("Vista previa técnica de archivos cargados"):
     st.caption("Vista técnica para revisar las primeras filas leídas sin formato ni filtros de la tabla principal.")
