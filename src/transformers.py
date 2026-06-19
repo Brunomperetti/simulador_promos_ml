@@ -5,22 +5,24 @@ from __future__ import annotations
 import pandas as pd
 
 from src.loaders import ML_REQUIRED_COLUMNS, TN_COLUMN_ALIASES
-from src.utils import add_normalized_sku
+from src.utils import add_normalized_sku, format_currency, format_plain_text
 
 OUTPUT_COLUMNS = [
     "SKU",
     "TITLE",
+    "Nombre",
+    "Categorías",
+    "Marca",
+    "Costo",
+    "Código de barras / EAN",
     "ORIGINAL_PRICE",
     "DISCOUNT_PERCENTAGE",
     "FINAL_PRICE",
     "ACTION",
-    "Costo",
-    "Código de barras / EAN",
-    "Nombre",
-    "Categorías",
-    "Marca",
 ]
 SORT_COLUMNS = ["Categorías", "Marca", "SKU"]
+TEXT_COLUMNS = ["Código de barras / EAN"]
+PRICE_COLUMNS = ["Costo", "ORIGINAL_PRICE", "FINAL_PRICE"]
 
 
 def _ensure_columns(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
@@ -50,4 +52,8 @@ def build_display_table(merged_df: pd.DataFrame) -> pd.DataFrame:
     """Selecciona y ordena las columnas visibles en la app."""
     table = _ensure_columns(merged_df, OUTPUT_COLUMNS)[OUTPUT_COLUMNS].copy()
     table = table.sort_values(SORT_COLUMNS, na_position="last", kind="stable")
+    for column in TEXT_COLUMNS:
+        table[column] = table[column].map(format_plain_text)
+    for column in PRICE_COLUMNS:
+        table[column] = table[column].map(format_currency)
     return table.reset_index(drop=True)
