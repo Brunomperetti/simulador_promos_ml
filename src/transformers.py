@@ -11,6 +11,7 @@ from src.utils import add_normalized_sku, format_currency, format_percentage, fo
 OUTPUT_COLUMNS = [
     "_ROW_ID",
     "SKU",
+    "ITEM_ID",
     "TITLE",
     "Nombre",
     "Categorías",
@@ -26,6 +27,8 @@ OUTPUT_COLUMNS = [
     "Margen estimado",
     "Margen %",
     "Alerta margen",
+    "STATUS",
+    "ERRORS",
 ]
 SORT_COLUMNS = ["Categorías", "Marca", "SKU"]
 TEXT_COLUMNS = ["Código de barras / EAN"]

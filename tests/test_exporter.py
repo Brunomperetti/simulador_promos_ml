@@ -93,5 +93,111 @@ class MercadoLibreExporterTest(unittest.TestCase):
         self.assertEqual(promos["G5"].value, "Participar")
 
 
+class InternalReportExporterTest(unittest.TestCase):
+    def test_internal_report_includes_enriched_rows_summary_sorting_and_formats(self):
+        from src.exporter import INTERNAL_REPORT_COLUMNS, export_internal_report_excel
+
+        simulated = pd.DataFrame(
+            [
+                {
+                    "SKU": "SKU2",
+                    "ITEM_ID": "MLA2",
+                    "TITLE": "Producto no modificado",
+                    "Nombre": "Nombre 2",
+                    "Categorías": "Bazar",
+                    "Marca": "Marca B",
+                    "Código de barras / EAN": "7791234567890.0",
+                    "Costo": 1000,
+                    "ORIGINAL_PRICE": 2000,
+                    "DISCOUNT_PERCENTAGE": 10,
+                    "FINAL_PRICE": 1800,
+                    "ACTION": "No participar",
+                    "Modificado": "No",
+                    "Campo modificado": "",
+                    "Margen estimado": 800,
+                    "Margen %": 0.4444,
+                    "Alerta margen": "",
+                    "STATUS": "ok",
+                    "ERRORS": "",
+                    "_HAS_MATCH": True,
+                },
+                {
+                    "SKU": "SKU1",
+                    "ITEM_ID": "MLA1",
+                    "TITLE": "Producto modificado",
+                    "Nombre": "Nombre 1",
+                    "Categorías": "Accesorios",
+                    "Marca": "Marca A",
+                    "Código de barras / EAN": "7.791234567891E+12",
+                    "Costo": 33470,
+                    "ORIGINAL_PRICE": 50000,
+                    "DISCOUNT_PERCENTAGE": 20,
+                    "FINAL_PRICE": 40000,
+                    "ACTION": "Participar",
+                    "Modificado": "Sí",
+                    "Campo modificado": "Descuento",
+                    "Margen estimado": 6530,
+                    "Margen %": 0.16325,
+                    "Alerta margen": "",
+                    "STATUS": "ok",
+                    "ERRORS": "",
+                    "_HAS_MATCH": True,
+                },
+                {
+                    "SKU": "SKU3",
+                    "ITEM_ID": "MLA3",
+                    "TITLE": "Producto sin cruce",
+                    "Código de barras / EAN": "",
+                    "Costo": pd.NA,
+                    "ORIGINAL_PRICE": 3000,
+                    "DISCOUNT_PERCENTAGE": 5,
+                    "FINAL_PRICE": 2850,
+                    "ACTION": "No participar",
+                    "Modificado": "No",
+                    "Margen estimado": pd.NA,
+                    "Margen %": pd.NA,
+                    "Alerta margen": "Margen bajo",
+                    "_HAS_MATCH": False,
+                },
+            ]
+        )
+
+        exported = export_internal_report_excel(simulated)
+        wb = load_workbook(BytesIO(exported))
+
+        self.assertIn("Reporte", wb.sheetnames)
+        self.assertIn("Resumen", wb.sheetnames)
+
+        report = wb["Reporte"]
+        headers = [cell.value for cell in report[1]]
+        self.assertEqual(headers, INTERNAL_REPORT_COLUMNS)
+        rows = list(report.iter_rows(min_row=2, values_only=True))
+        modified_index = headers.index("Modificado")
+        self.assertEqual([row[modified_index] for row in rows], ["Sí", "No", "No"])
+        self.assertEqual({row[modified_index] for row in rows}, {"Sí", "No"})
+
+        ean_index = headers.index("Código de barras / EAN")
+        self.assertEqual(rows[0][ean_index], "7791234567891")
+        self.assertEqual(rows[1][ean_index], "7791234567890")
+
+        cost_index = headers.index("Costo")
+        final_price_index = headers.index("FINAL_PRICE")
+        margin_index = headers.index("Margen estimado")
+        margin_percentage_index = headers.index("Margen %")
+        self.assertEqual(rows[0][cost_index], "$ 33.470,00")
+        self.assertEqual(rows[0][final_price_index], "$ 40.000,00")
+        self.assertEqual(rows[0][margin_index], "$ 6.530,00")
+        self.assertEqual(rows[0][margin_percentage_index], "16,32%")
+
+        summary_values = {row[0].value: row[1].value for row in wb["Resumen"].iter_rows(min_row=2, max_col=2)}
+        self.assertEqual(summary_values["Total publicaciones ML"], 3)
+        self.assertEqual(summary_values["Total productos cruzados"], 2)
+        self.assertEqual(summary_values["Total sin cruce"], 1)
+        self.assertEqual(summary_values["Total sin costo"], 1)
+        self.assertEqual(summary_values["Total sin EAN"], 1)
+        self.assertEqual(summary_values["Total modificados"], 1)
+        self.assertEqual(summary_values["Total con margen bajo"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

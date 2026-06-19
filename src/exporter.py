@@ -1,4 +1,4 @@
-"""Exportación del Excel final de promociones para Mercado Libre."""
+"""Exportaciones de promociones para Mercado Libre y reportes internos."""
 
 from __future__ import annotations
 
@@ -6,13 +6,38 @@ from io import BytesIO
 from typing import BinaryIO
 
 import pandas as pd
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font
 from openpyxl.worksheet.worksheet import Worksheet
 
 from src.loaders import ML_SHEET_NAME, ML_SKU_ALIASES, _read_upload_bytes, detect_ml_header_row
 from src.ml_rows import is_real_ml_publication
 from src.transformers import build_row_identifier
-from src.utils import parse_optional_number
+from src.utils import format_currency, format_percentage, format_plain_text, parse_optional_number
+
+INTERNAL_REPORT_COLUMNS = [
+    "SKU",
+    "ITEM_ID",
+    "TITLE",
+    "Nombre",
+    "Categorías",
+    "Marca",
+    "Código de barras / EAN",
+    "Costo",
+    "ORIGINAL_PRICE",
+    "DISCOUNT_PERCENTAGE",
+    "FINAL_PRICE",
+    "ACTION",
+    "Modificado",
+    "Campo modificado",
+    "Margen estimado",
+    "Margen %",
+    "Alerta margen",
+    "STATUS",
+    "ERRORS",
+]
+INTERNAL_CURRENCY_COLUMNS = {"Costo", "ORIGINAL_PRICE", "FINAL_PRICE", "Margen estimado"}
+INTERNAL_SORT_COLUMNS = ["_MODIFICADO_SORT", "Categorías", "Marca", "SKU"]
 
 EDITABLE_COLUMNS = ("DISCOUNT_PERCENTAGE", "FINAL_PRICE", "ACTION")
 PARTICIPATE_ACTION = "Participar"
@@ -114,3 +139,83 @@ def has_modified_rows(df: pd.DataFrame) -> bool:
     if "Modificado" not in df.columns:
         return False
     return df["Modificado"].fillna("").astype(str).str.strip().eq("Sí").any()
+
+
+def _internal_report_value(column: str, value: object) -> object:
+    """Normaliza valores para que el reporte interno sea legible y seguro para revisión."""
+    if column == "Código de barras / EAN":
+        return format_plain_text(value)
+    if column in INTERNAL_CURRENCY_COLUMNS:
+        return format_currency(value)
+    if column == "Margen %":
+        return format_percentage(value)
+    if pd.isna(value):
+        return ""
+    return value
+
+
+def _prepare_internal_report_df(simulated_df: pd.DataFrame) -> pd.DataFrame:
+    """Construye la hoja principal del reporte interno con filas modificadas y no modificadas."""
+    report = simulated_df.copy()
+    for column in INTERNAL_REPORT_COLUMNS:
+        if column not in report.columns:
+            report[column] = pd.NA
+
+    report["_MODIFICADO_SORT"] = report["Modificado"].fillna("").astype(str).str.strip().eq("Sí").astype(int)
+    report = report.sort_values(INTERNAL_SORT_COLUMNS, ascending=[False, True, True, True], na_position="last", kind="stable")
+    report = report[INTERNAL_REPORT_COLUMNS].copy()
+    for column in INTERNAL_REPORT_COLUMNS:
+        report[column] = report[column].map(lambda value, column=column: _internal_report_value(column, value))
+    return report.reset_index(drop=True)
+
+
+def _build_internal_summary(simulated_df: pd.DataFrame) -> list[tuple[str, object]]:
+    """Calcula métricas de control para la hoja Resumen."""
+    has_match = simulated_df.get("_HAS_MATCH", pd.Series(False, index=simulated_df.index)).fillna(False).astype(bool)
+    cost = simulated_df.get("Costo", pd.Series(pd.NA, index=simulated_df.index))
+    ean = simulated_df.get("Código de barras / EAN", pd.Series(pd.NA, index=simulated_df.index)).map(format_plain_text)
+    modified = simulated_df.get("Modificado", pd.Series("", index=simulated_df.index)).fillna("").astype(str).str.strip().eq("Sí")
+    alert = simulated_df.get("Alerta margen", pd.Series("", index=simulated_df.index)).fillna("").astype(str).str.strip()
+
+    return [
+        ("Total publicaciones ML", int(len(simulated_df))),
+        ("Total productos cruzados", int(has_match.sum())),
+        ("Total sin cruce", int((~has_match).sum())),
+        ("Total sin costo", int(cost.map(parse_optional_number).isna().sum())),
+        ("Total sin EAN", int(ean.eq("").sum())),
+        ("Total modificados", int(modified.sum())),
+        ("Total con margen negativo", int(alert.eq("Margen negativo").sum())),
+        ("Total con margen bajo", int(alert.eq("Margen bajo").sum())),
+        ("Fecha/hora de generación", pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")),
+    ]
+
+
+def export_internal_report_excel(simulated_df: pd.DataFrame) -> bytes:
+    """Genera el Excel de control interno con hoja Reporte y hoja Resumen."""
+    workbook = Workbook()
+    report_sheet = workbook.active
+    report_sheet.title = "Reporte"
+
+    report_df = _prepare_internal_report_df(simulated_df)
+    report_sheet.append(INTERNAL_REPORT_COLUMNS)
+    for row in report_df.itertuples(index=False, name=None):
+        report_sheet.append(row)
+
+    for cell in report_sheet[1]:
+        cell.font = Font(bold=True)
+    for column_cells in report_sheet.columns:
+        width = min(max(len(str(cell.value or "")) for cell in column_cells) + 2, 45)
+        report_sheet.column_dimensions[column_cells[0].column_letter].width = width
+
+    summary_sheet = workbook.create_sheet("Resumen")
+    summary_sheet.append(["Métrica", "Valor"])
+    for metric, value in _build_internal_summary(simulated_df):
+        summary_sheet.append([metric, value])
+    for cell in summary_sheet[1]:
+        cell.font = Font(bold=True)
+    summary_sheet.column_dimensions["A"].width = 32
+    summary_sheet.column_dimensions["B"].width = 24
+
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
