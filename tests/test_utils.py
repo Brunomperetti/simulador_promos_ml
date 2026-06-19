@@ -1,9 +1,21 @@
 import unittest
 
-from src.utils import format_currency, parse_currency_amount
+from src.utils import format_currency, format_plain_text, parse_currency_amount
 
 
 class CurrencyParsingTest(unittest.TestCase):
+
+    def test_format_plain_text_cleans_ean_decimals_and_scientific_notation(self):
+        cases = {
+            "7794940000000.0": "7794940000000",
+            "7.79494e12": "7794940000000",
+            "7794940000000": "7794940000000",
+        }
+
+        for raw_value, expected in cases.items():
+            with self.subTest(raw_value=raw_value):
+                self.assertEqual(format_plain_text(raw_value), expected)
+
     def test_parse_currency_amount_supported_formats(self):
         cases = {
             "8,762.64": 8762.64,
