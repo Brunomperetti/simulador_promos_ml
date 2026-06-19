@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
 import pandas as pd
@@ -35,6 +36,49 @@ def normalize_sku(value: object) -> str:
     sku = unicodedata.normalize("NFKC", sku)
     sku = re.sub(r"\s+", "", sku)
     return sku.upper()
+
+
+def format_plain_text(value: object) -> str:
+    """Formatea identificadores como texto, evitando decimales y notación científica."""
+    if pd.isna(value):
+        return ""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    try:
+        decimal_value = Decimal(text.replace(",", "."))
+    except (InvalidOperation, ValueError):
+        return text[:-2] if re.fullmatch(r"\d+\.0", text) else text
+
+    if decimal_value == decimal_value.to_integral_value():
+        return str(decimal_value.quantize(Decimal("1")))
+    return format(decimal_value.normalize(), "f")
+
+
+def format_currency(value: object) -> str:
+    """Formatea importes con separadores de miles y dos decimales."""
+    if pd.isna(value):
+        return ""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    normalized = text
+    if "," in normalized and "." in normalized:
+        normalized = normalized.replace(".", "").replace(",", ".")
+    elif "," in normalized:
+        normalized = normalized.replace(",", ".")
+
+    try:
+        amount = float(normalized)
+    except ValueError:
+        return text
+
+    formatted = f"$ {amount:,.2f}"
+    return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def add_normalized_sku(df: pd.DataFrame, source_column: str = "SKU") -> pd.DataFrame:
