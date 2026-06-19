@@ -30,6 +30,9 @@ OUTPUT_COLUMNS = [
 SORT_COLUMNS = ["Categorías", "Marca", "SKU"]
 TEXT_COLUMNS = ["Código de barras / EAN"]
 PRICE_COLUMNS = ["Costo", "ORIGINAL_PRICE", "FINAL_PRICE", "Margen estimado"]
+PERCENTAGE_POINT_COLUMNS = ["DISCOUNT_PERCENTAGE"]
+RATIO_PERCENTAGE_COLUMNS = ["Margen %"]
+INTERNAL_COLUMNS = ["_ROW_ID", "_HAS_MATCH", "_matched_tn"]
 READ_ONLY_COLUMNS = [column for column in OUTPUT_COLUMNS if column not in {"DISCOUNT_PERCENTAGE", "FINAL_PRICE"}]
 
 
@@ -116,19 +119,22 @@ def calculate_margin_percentage(final_price: object, cost: object) -> float | No
 
 def build_margin_alert(row: pd.Series) -> str:
     """Construye una alerta legible para problemas de margen o datos faltantes."""
-    alerts: list[str] = []
-    if not bool(row.get("_HAS_MATCH", False)):
-        alerts.append("Sin cruce")
+    matched_tn = row.get("_matched_tn", row.get("_HAS_MATCH", False))
+    matched_tn = False if pd.isna(matched_tn) else bool(matched_tn)
+    if not matched_tn:
+        return "Sin cruce"
     if parse_optional_number(row.get("Costo")) is None:
-        alerts.append("Sin costo")
+        return "Sin costo"
+    if not format_plain_text(row.get("Código de barras / EAN")):
+        return "Sin EAN"
 
     margin_percentage = row.get("Margen %")
     if margin_percentage is not None and not pd.isna(margin_percentage):
         if margin_percentage < 0:
-            alerts.append("Margen negativo")
-        elif margin_percentage < 0.15:
-            alerts.append("Margen menor al 15%")
-    return " | ".join(alerts)
+            return "Margen negativo"
+        if margin_percentage < 0.15:
+            return "Margen bajo"
+    return ""
 
 
 def _ensure_columns(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
@@ -150,9 +156,11 @@ def merge_ml_with_tienda_nube(ml_df: pd.DataFrame, tn_df: pd.DataFrame) -> pd.Da
     tn_prepared = tn_prepared.drop_duplicates(subset=["_SKU_NORMALIZED"], keep="first")
 
     enrichment_columns = ["_SKU_NORMALIZED", "Costo", "Código de barras / EAN", "Nombre", "Categorías", "Marca"]
+    matched_skus = set(tn_prepared["_SKU_NORMALIZED"].dropna()) - {""}
     merged = ml_prepared.merge(tn_prepared[enrichment_columns], on="_SKU_NORMALIZED", how="left")
     merged["Código de barras / EAN"] = merged["Código de barras / EAN"].map(format_plain_text)
-    merged["_HAS_MATCH"] = merged["Nombre"].notna() | merged["Costo"].notna() | merged["Código de barras / EAN"].notna()
+    merged["_matched_tn"] = merged["_SKU_NORMALIZED"].isin(matched_skus)
+    merged["_HAS_MATCH"] = merged["_matched_tn"]
     return merged
 
 
@@ -201,7 +209,8 @@ def apply_promotion_edits(original_df: pd.DataFrame, edited_df: pd.DataFrame) ->
 
 def build_editable_table(merged_df: pd.DataFrame) -> pd.DataFrame:
     """Prepara la tabla principal editable con valores numéricos calculables."""
-    table = _ensure_columns(merged_df, OUTPUT_COLUMNS)[[column for column in OUTPUT_COLUMNS if column != "_ROW_ID"]].copy()
+    columns = [column for column in OUTPUT_COLUMNS if column != "_ROW_ID"] + ["_HAS_MATCH", "_matched_tn"]
+    table = _ensure_columns(merged_df, columns)[columns].copy()
     table.insert(0, "_ROW_ID", build_row_identifiers(merged_df))
     for column in ["Costo", "ORIGINAL_PRICE", "DISCOUNT_PERCENTAGE", "FINAL_PRICE"]:
         table[column] = table[column].map(parse_optional_number)
@@ -213,14 +222,37 @@ def build_editable_table(merged_df: pd.DataFrame) -> pd.DataFrame:
     return table.sort_values(SORT_COLUMNS, na_position="last", kind="stable").reset_index(drop=True)
 
 
+def format_percentage_points(value: object) -> str:
+    """Formatea porcentajes guardados como puntos porcentuales."""
+    number = parse_optional_number(value)
+    if number is None:
+        return ""
+    return f"{number:g}%".replace(".", ",")
+
+
+def format_table_for_display(df: pd.DataFrame, drop_internal: bool = True) -> pd.DataFrame:
+    """Aplica formato visual sin mutar la tabla numérica usada para cálculos."""
+    table = df.copy()
+    for column in TEXT_COLUMNS:
+        if column in table.columns:
+            table[column] = table[column].map(format_plain_text)
+    for column in PRICE_COLUMNS:
+        if column in table.columns:
+            table[column] = table[column].map(format_currency)
+    for column in PERCENTAGE_POINT_COLUMNS:
+        if column in table.columns:
+            table[column] = table[column].map(format_percentage_points)
+    for column in RATIO_PERCENTAGE_COLUMNS:
+        if column in table.columns:
+            table[column] = table[column].map(format_percentage)
+    if drop_internal:
+        table = table.drop(columns=INTERNAL_COLUMNS, errors="ignore")
+    return table
+
+
 def build_display_table(merged_df: pd.DataFrame) -> pd.DataFrame:
     """Selecciona y ordena las columnas visibles en la app."""
-    table = add_simulation_columns(_ensure_columns(merged_df, OUTPUT_COLUMNS)[OUTPUT_COLUMNS].copy())
+    columns = OUTPUT_COLUMNS + ["_HAS_MATCH", "_matched_tn"]
+    table = add_simulation_columns(_ensure_columns(merged_df, columns)[columns].copy())
     table = table.sort_values(SORT_COLUMNS, na_position="last", kind="stable")
-    for column in TEXT_COLUMNS:
-        table[column] = table[column].map(format_plain_text)
-    for column in PRICE_COLUMNS:
-        table[column] = table[column].map(format_currency)
-    table["Margen %"] = table["Margen %"].map(format_percentage)
-    table = table.drop(columns=["_ROW_ID"], errors="ignore")
-    return table.reset_index(drop=True)
+    return format_table_for_display(table).reset_index(drop=True)

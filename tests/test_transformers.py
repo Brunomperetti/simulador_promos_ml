@@ -10,6 +10,7 @@ from src.transformers import (
     calculate_margin,
     calculate_margin_percentage,
     filter_modified_rows,
+    format_table_for_display,
     merge_ml_with_tienda_nube,
     recalculate_discount_percentage,
     recalculate_final_price,
@@ -119,25 +120,63 @@ class PromotionSimulationTest(unittest.TestCase):
     def test_calculate_margin_percentage(self):
         self.assertAlmostEqual(calculate_margin_percentage(750, 500), 250 / 750)
 
-    def test_detect_negative_and_low_margin_alerts(self):
-        negative = pd.Series({"_HAS_MATCH": True, "Costo": 120, "Margen %": -0.2})
-        low = pd.Series({"_HAS_MATCH": True, "Costo": 90, "Margen %": 0.1})
-
-        self.assertIn("Margen negativo", build_margin_alert(negative))
-        self.assertIn("Margen menor al 15%", build_margin_alert(low))
-
-    def test_add_simulation_columns_marks_missing_data(self):
+    def test_recalculated_display_table_formats_money_and_percentages(self):
         df = pd.DataFrame(
             [
-                {"FINAL_PRICE": 100, "Costo": None, "_HAS_MATCH": True},
-                {"FINAL_PRICE": 100, "Costo": 70, "_HAS_MATCH": False},
+                {
+                    "Costo": 33470,
+                    "ORIGINAL_PRICE": 101350,
+                    "FINAL_PRICE": 50733.6,
+                    "DISCOUNT_PERCENTAGE": 50,
+                    "Margen estimado": 17263.6,
+                    "Margen %": 0.3403,
+                    "Código de barras / EAN": "7794940000000",
+                }
+            ]
+        )
+
+        result = format_table_for_display(df)
+
+        self.assertEqual(result.loc[0, "Costo"], "$ 33.470,00")
+        self.assertEqual(result.loc[0, "FINAL_PRICE"], "$ 50.733,60")
+        self.assertEqual(result.loc[0, "Margen %"], "34,03%")
+
+    def test_detect_negative_and_low_margin_alerts(self):
+        negative = pd.Series({"_matched_tn": True, "Costo": 120, "Código de barras / EAN": "779", "Margen %": -0.2})
+        low = pd.Series({"_matched_tn": True, "Costo": 90, "Código de barras / EAN": "779", "Margen %": 0.1})
+
+        self.assertEqual(build_margin_alert(negative), "Margen negativo")
+        self.assertEqual(build_margin_alert(low), "Margen bajo")
+
+    def test_add_simulation_columns_marks_missing_data_by_alert_priority(self):
+        df = pd.DataFrame(
+            [
+                {"FINAL_PRICE": 100, "Costo": 70, "Código de barras / EAN": "779", "_matched_tn": True},
+                {"FINAL_PRICE": 100, "Costo": 70, "Código de barras / EAN": "779", "_matched_tn": False},
+                {"FINAL_PRICE": 100, "Costo": None, "Código de barras / EAN": "779", "_matched_tn": True},
+                {"FINAL_PRICE": 100, "Costo": 70, "Código de barras / EAN": "", "_matched_tn": True},
             ]
         )
 
         result = add_simulation_columns(df)
 
-        self.assertIn("Sin costo", result.loc[0, "Alerta margen"])
-        self.assertIn("Sin cruce", result.loc[1, "Alerta margen"])
+        self.assertNotEqual(result.loc[0, "Alerta margen"], "Sin cruce")
+        self.assertEqual(result.loc[1, "Alerta margen"], "Sin cruce")
+        self.assertEqual(result.loc[2, "Alerta margen"], "Sin costo")
+        self.assertEqual(result.loc[3, "Alerta margen"], "Sin EAN")
+
+    def test_merge_marks_real_sku_match_even_when_enriched_values_are_missing(self):
+        ml_df = pd.DataFrame(
+            [{"ITEM_ID": "MLA1", "SKU": "SKU1", "TITLE": "Producto", "ORIGINAL_PRICE": 100, "DISCOUNT_PERCENTAGE": 10, "FINAL_PRICE": 90}]
+        )
+        tn_df = pd.DataFrame(
+            [{"SKU": "SKU1", "Costo": None, "Código de barras / EAN": None, "Nombre": None, "Categorías": None, "Marca": None}]
+        )
+
+        result = merge_ml_with_tienda_nube(ml_df, tn_df)
+
+        self.assertTrue(result.loc[0, "_matched_tn"])
+        self.assertTrue(result.loc[0, "_HAS_MATCH"])
 
 
 if __name__ == "__main__":

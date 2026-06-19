@@ -10,6 +10,7 @@ from src.transformers import (
     apply_promotion_edits,
     build_editable_table,
     filter_modified_rows,
+    format_table_for_display,
     merge_ml_with_tienda_nube,
 )
 from src.validators import (
@@ -142,7 +143,7 @@ if only_modified:
 if not simulated_df.equals(edited_df) or only_modified:
     st.info("Se recalcularon precio final, descuento y alertas de margen según las ediciones.")
     st.dataframe(
-        display_simulated_df.drop(columns=["_ROW_ID"], errors="ignore"),
+        format_table_for_display(display_simulated_df),
         use_container_width=True,
         hide_index=True,
     )
