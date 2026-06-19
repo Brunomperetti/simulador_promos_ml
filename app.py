@@ -5,7 +5,13 @@ from __future__ import annotations
 import streamlit as st
 
 from src.loaders import load_mercado_libre_excel, load_tienda_nube_csv
-from src.transformers import READ_ONLY_COLUMNS, apply_promotion_edits, build_editable_table, merge_ml_with_tienda_nube
+from src.transformers import (
+    READ_ONLY_COLUMNS,
+    apply_promotion_edits,
+    build_editable_table,
+    filter_modified_rows,
+    merge_ml_with_tienda_nube,
+)
 from src.validators import (
     build_metrics,
     is_blank,
@@ -64,10 +70,11 @@ with st.container(border=True):
     selected_category = option_col_1.selectbox("Filtrar por categoría", ["Todas"] + category_options)
     selected_brand = option_col_2.selectbox("Filtrar por marca", ["Todas"] + brand_options)
 
-    flag_col_1, flag_col_2, flag_col_3 = st.columns(3)
+    flag_col_1, flag_col_2, flag_col_3, flag_col_4 = st.columns(4)
     only_without_match = flag_col_1.checkbox("Ver solo productos sin cruce")
     only_without_cost = flag_col_2.checkbox("Ver solo productos sin costo")
     only_without_ean = flag_col_3.checkbox("Ver solo productos sin EAN")
+    only_modified = flag_col_4.checkbox("Ver solo modificados")
 
 filtered_df = merged_df.copy()
 if sku_query:
@@ -128,10 +135,14 @@ validation_errors = validate_editable_promotions(simulated_df)
 if validation_errors:
     st.warning("Hay valores inválidos en la simulación:\n\n- " + "\n- ".join(validation_errors))
 
-if not simulated_df.equals(edited_df):
+display_simulated_df = filter_modified_rows(simulated_df) if only_modified else simulated_df
+if only_modified:
+    st.caption(f"Mostrando {len(display_simulated_df)} filas modificadas.")
+
+if not simulated_df.equals(edited_df) or only_modified:
     st.info("Se recalcularon precio final, descuento y alertas de margen según las ediciones.")
     st.dataframe(
-        simulated_df.drop(columns=["_ROW_ID"], errors="ignore"),
+        display_simulated_df.drop(columns=["_ROW_ID"], errors="ignore"),
         use_container_width=True,
         hide_index=True,
     )

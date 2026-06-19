@@ -4,15 +4,109 @@ import pandas as pd
 
 from src.transformers import (
     add_simulation_columns,
+    apply_promotion_edits,
+    build_editable_table,
     build_margin_alert,
     calculate_margin,
     calculate_margin_percentage,
+    filter_modified_rows,
+    merge_ml_with_tienda_nube,
     recalculate_discount_percentage,
     recalculate_final_price,
 )
 
 
 class PromotionSimulationTest(unittest.TestCase):
+
+    def test_initial_action_is_no_participar_for_real_rows(self):
+        ml_df = pd.DataFrame(
+            [{"ITEM_ID": "MLA1", "SKU": "SKU1", "TITLE": "Producto", "ORIGINAL_PRICE": 10000, "DISCOUNT_PERCENTAGE": 5, "FINAL_PRICE": 9500, "ACTION": "Participar"}]
+        )
+        tn_df = pd.DataFrame(
+            [{"SKU": "SKU1", "Costo": 5000, "Código de barras / EAN": "7794940000000.0", "Nombre": "Producto", "Categorías": "Cat", "Marca": "Marca"}]
+        )
+
+        editable = build_editable_table(merge_ml_with_tienda_nube(ml_df, tn_df))
+
+        self.assertEqual(editable.loc[0, "ACTION"], "No participar")
+        self.assertEqual(editable.loc[0, "Modificado"], "No")
+
+    def test_discount_change_marks_row_and_recalculates_final_price(self):
+        original = build_editable_table(
+            pd.DataFrame(
+                [{"ITEM_ID": "MLA1", "SKU": "SKU1", "TITLE": "Producto", "ORIGINAL_PRICE": 10000, "DISCOUNT_PERCENTAGE": 5, "FINAL_PRICE": 9500, "ACTION": "Participar"}]
+            )
+        )
+        edited = original.copy()
+        edited.loc[0, "DISCOUNT_PERCENTAGE"] = 10
+
+        result = apply_promotion_edits(original, edited)
+
+        self.assertEqual(result.loc[0, "ACTION"], "Participar")
+        self.assertEqual(result.loc[0, "Modificado"], "Sí")
+        self.assertEqual(result.loc[0, "Campo modificado"], "Descuento")
+        self.assertEqual(result.loc[0, "FINAL_PRICE"], 9000)
+
+    def test_final_price_change_marks_row_and_recalculates_discount(self):
+        original = build_editable_table(
+            pd.DataFrame(
+                [{"ITEM_ID": "MLA1", "SKU": "SKU1", "TITLE": "Producto", "ORIGINAL_PRICE": 10000, "DISCOUNT_PERCENTAGE": 5, "FINAL_PRICE": 9500}]
+            )
+        )
+        edited = original.copy()
+        edited.loc[0, "FINAL_PRICE"] = 8000
+
+        result = apply_promotion_edits(original, edited)
+
+        self.assertEqual(result.loc[0, "ACTION"], "Participar")
+        self.assertEqual(result.loc[0, "Modificado"], "Sí")
+        self.assertEqual(result.loc[0, "Campo modificado"], "Precio final")
+        self.assertEqual(result.loc[0, "DISCOUNT_PERCENTAGE"], 20)
+
+    def test_unchanged_rows_remain_unmodified(self):
+        original = build_editable_table(
+            pd.DataFrame(
+                [{"SKU": "SKU1", "TITLE": "Producto", "ORIGINAL_PRICE": 10000, "DISCOUNT_PERCENTAGE": 5, "FINAL_PRICE": 9500}]
+            )
+        )
+
+        result = apply_promotion_edits(original, original.copy())
+
+        self.assertEqual(result.loc[0, "ACTION"], "No participar")
+        self.assertEqual(result.loc[0, "Modificado"], "No")
+        self.assertEqual(result.loc[0, "Campo modificado"], "")
+
+    def test_both_changed_fields_are_labeled_and_discount_takes_priority(self):
+        original = build_editable_table(
+            pd.DataFrame(
+                [{"SKU": "SKU1", "TITLE": "Producto", "ORIGINAL_PRICE": 10000, "DISCOUNT_PERCENTAGE": 5, "FINAL_PRICE": 9500}]
+            )
+        )
+        edited = original.copy()
+        edited.loc[0, "DISCOUNT_PERCENTAGE"] = 10
+        edited.loc[0, "FINAL_PRICE"] = 8000
+
+        result = apply_promotion_edits(original, edited)
+
+        self.assertEqual(result.loc[0, "Campo modificado"], "Descuento y precio final")
+        self.assertEqual(result.loc[0, "FINAL_PRICE"], 9000)
+
+    def test_filter_modified_rows_keeps_only_modified(self):
+        df = pd.DataFrame([{"SKU": "A", "Modificado": "Sí"}, {"SKU": "B", "Modificado": "No"}])
+
+        result = filter_modified_rows(df)
+
+        self.assertEqual(result["SKU"].tolist(), ["A"])
+
+    def test_ean_is_cleaned_in_editable_table(self):
+        editable = build_editable_table(
+            pd.DataFrame(
+                [{"SKU": "SKU1", "TITLE": "Producto", "Código de barras / EAN": "7.79494e12", "ORIGINAL_PRICE": 10000, "DISCOUNT_PERCENTAGE": 5, "FINAL_PRICE": 9500}]
+            )
+        )
+
+        self.assertEqual(editable.loc[0, "Código de barras / EAN"], "7794940000000")
+
     def test_recalculate_final_price_from_discount_percentage(self):
         self.assertAlmostEqual(recalculate_final_price(1000, 25), 750)
 
