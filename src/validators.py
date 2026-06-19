@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src.loaders import ML_REQUIRED_COLUMNS, TN_COLUMN_ALIASES
+from src.ml_rows import is_real_ml_publication
 from src.utils import first_existing_column
 from src.utils import parse_optional_number
 
@@ -52,6 +53,9 @@ def validate_editable_promotions(df: pd.DataFrame) -> list[str]:
     """Valida los campos editables de la simulación sin interrumpir la ejecución."""
     errors: list[str] = []
     for position, row in df.reset_index(drop=True).iterrows():
+        if "ITEM_ID" in df.columns and not is_real_ml_publication(row):
+            continue
+
         label = row.get("SKU") or row.get("TITLE") or f"fila {position + 1}"
         discount = parse_optional_number(row.get("DISCOUNT_PERCENTAGE"))
         final_price = parse_optional_number(row.get("FINAL_PRICE"))
