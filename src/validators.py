@@ -6,6 +6,7 @@ import pandas as pd
 
 from src.loaders import ML_REQUIRED_COLUMNS, TN_COLUMN_ALIASES
 from src.utils import first_existing_column
+from src.utils import parse_optional_number
 
 
 def find_missing_columns(df: pd.DataFrame, required_columns: list[str]) -> list[str]:
@@ -45,3 +46,23 @@ def build_metrics(merged_df: pd.DataFrame) -> dict[str, int]:
         "Total sin costo": int(is_blank(cost).sum()),
         "Total sin EAN": int(is_blank(ean).sum()),
     }
+
+
+def validate_editable_promotions(df: pd.DataFrame) -> list[str]:
+    """Valida los campos editables de la simulación sin interrumpir la ejecución."""
+    errors: list[str] = []
+    for position, row in df.reset_index(drop=True).iterrows():
+        label = row.get("SKU") or row.get("TITLE") or f"fila {position + 1}"
+        discount = parse_optional_number(row.get("DISCOUNT_PERCENTAGE"))
+        final_price = parse_optional_number(row.get("FINAL_PRICE"))
+
+        if discount is None:
+            errors.append(f"{label}: DISCOUNT_PERCENTAGE debe ser numérico.")
+        elif discount < 5 or discount > 80:
+            errors.append(f"{label}: DISCOUNT_PERCENTAGE debe estar entre 5 y 80.")
+
+        if final_price is None:
+            errors.append(f"{label}: FINAL_PRICE debe ser numérico.")
+        elif final_price <= 0:
+            errors.append(f"{label}: FINAL_PRICE debe ser mayor a 0.")
+    return errors

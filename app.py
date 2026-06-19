@@ -5,8 +5,14 @@ from __future__ import annotations
 import streamlit as st
 
 from src.loaders import load_mercado_libre_excel, load_tienda_nube_csv
-from src.transformers import build_display_table, merge_ml_with_tienda_nube
-from src.validators import build_metrics, is_blank, validate_ml_columns, validate_tienda_nube_columns
+from src.transformers import READ_ONLY_COLUMNS, apply_promotion_edits, build_editable_table, merge_ml_with_tienda_nube
+from src.validators import (
+    build_metrics,
+    is_blank,
+    validate_editable_promotions,
+    validate_ml_columns,
+    validate_tienda_nube_columns,
+)
 
 st.set_page_config(page_title="Simulador de Promociones ML", page_icon="📊", layout="wide")
 
@@ -83,9 +89,52 @@ if only_without_cost:
 if only_without_ean:
     filtered_df = filtered_df[is_blank(filtered_df["Código de barras / EAN"])]
 
-display_df = build_display_table(filtered_df)
-st.caption(f"Mostrando {len(display_df)} de {len(merged_df)} publicaciones.")
-st.dataframe(display_df, use_container_width=True, hide_index=True)
+editable_df = build_editable_table(filtered_df)
+st.caption(f"Mostrando {len(editable_df)} de {len(merged_df)} publicaciones.")
+
+edited_df = st.data_editor(
+    editable_df,
+    use_container_width=True,
+    hide_index=True,
+    disabled=READ_ONLY_COLUMNS,
+    column_order=[column for column in editable_df.columns if column != "_ROW_ID"],
+    column_config={
+        "_ROW_ID": None,
+        "Costo": st.column_config.NumberColumn("Costo", format="$ %.2f", disabled=True),
+        "ORIGINAL_PRICE": st.column_config.NumberColumn("ORIGINAL_PRICE", format="$ %.2f", disabled=True),
+        "DISCOUNT_PERCENTAGE": st.column_config.NumberColumn(
+            "DISCOUNT_PERCENTAGE",
+            min_value=5,
+            max_value=80,
+            step=1,
+            format="%.0f %%",
+            help="Editá este valor para recalcular FINAL_PRICE.",
+        ),
+        "FINAL_PRICE": st.column_config.NumberColumn(
+            "FINAL_PRICE",
+            min_value=0.01,
+            step=1.0,
+            format="$ %.2f",
+            help="Editá este valor para recalcular DISCOUNT_PERCENTAGE.",
+        ),
+        "Margen estimado": st.column_config.NumberColumn("Margen estimado", format="$ %.2f", disabled=True),
+        "Margen %": st.column_config.NumberColumn("Margen %", format="percent", disabled=True),
+    },
+    key="promotion_editor",
+)
+
+simulated_df = apply_promotion_edits(editable_df, edited_df)
+validation_errors = validate_editable_promotions(simulated_df)
+if validation_errors:
+    st.warning("Hay valores inválidos en la simulación:\n\n- " + "\n- ".join(validation_errors))
+
+if not simulated_df.equals(edited_df):
+    st.info("Se recalcularon precio final, descuento y alertas de margen según las ediciones.")
+    st.dataframe(
+        simulated_df.drop(columns=["_ROW_ID"], errors="ignore"),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 with st.expander("Vista previa técnica de archivos cargados"):
     st.caption("Vista técnica para revisar las primeras filas leídas sin formato ni filtros de la tabla principal.")
