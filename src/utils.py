@@ -57,25 +57,66 @@ def format_plain_text(value: object) -> str:
     return format(decimal_value.normalize(), "f")
 
 
+def parse_currency_amount(value: object) -> float:
+    """Convierte importes en formato estadounidense o argentino a número real."""
+    if pd.isna(value):
+        raise ValueError("No se puede convertir un importe vacío.")
+
+    if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+        return float(value)
+
+    text = str(value).strip()
+    if not text:
+        raise ValueError("No se puede convertir un importe vacío.")
+
+    normalized = re.sub(r"[^\d,.-]", "", text)
+    if not normalized or normalized in {"-", ",", "."}:
+        raise ValueError(f"No se pudo convertir el importe: {value}")
+
+    last_comma = normalized.rfind(",")
+    last_dot = normalized.rfind(".")
+
+    if last_comma >= 0 and last_dot >= 0:
+        decimal_separator = "," if last_comma > last_dot else "."
+        thousands_separator = "." if decimal_separator == "," else ","
+        normalized = normalized.replace(thousands_separator, "")
+        normalized = normalized.replace(decimal_separator, ".")
+    elif "," in normalized:
+        normalized = _normalize_single_separator_amount(normalized, ",")
+    elif "." in normalized:
+        normalized = _normalize_single_separator_amount(normalized, ".")
+
+    try:
+        return float(Decimal(normalized))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"No se pudo convertir el importe: {value}") from exc
+
+
+def _normalize_single_separator_amount(value: str, separator: str) -> str:
+    """Normaliza importes con un único tipo de separador."""
+    parts = value.split(separator)
+    if len(parts) == 2:
+        integer_part, decimal_part = parts
+        if len(decimal_part) == 3 and integer_part and len(integer_part) <= 3:
+            return integer_part + decimal_part
+        return f"{integer_part}.{decimal_part}" if separator == "," else value
+
+    if all(len(part) == 3 for part in parts[1:]):
+        return "".join(parts)
+
+    integer_part = "".join(parts[:-1])
+    return f"{integer_part}.{parts[-1]}"
+
+
 def format_currency(value: object) -> str:
     """Formatea importes con separadores de miles y dos decimales."""
     if pd.isna(value):
         return ""
 
-    text = str(value).strip()
-    if not text:
-        return ""
-
-    normalized = text
-    if "," in normalized and "." in normalized:
-        normalized = normalized.replace(".", "").replace(",", ".")
-    elif "," in normalized:
-        normalized = normalized.replace(",", ".")
-
     try:
-        amount = float(normalized)
+        amount = parse_currency_amount(value)
     except ValueError:
-        return text
+        return str(value).strip()
 
     formatted = f"$ {amount:,.2f}"
     return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
