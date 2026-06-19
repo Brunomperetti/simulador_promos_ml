@@ -25,8 +25,29 @@ from src.validators import (
 st.set_page_config(page_title="Simulador de Promociones ML", page_icon="📊", layout="wide")
 
 st.title("Simulador de Promociones Mercado Libre")
-st.caption("Primera versión: lectura, cruce por SKU y visualización enriquecida con Tienda Nube.")
+st.caption("Herramienta para preparar promociones de Mercado Libre a partir del cruce con Tienda Nube.")
 
+st.markdown(
+    """
+    ### Cómo usar la app
+    1. Subí el **Excel de promociones de Mercado Libre**.
+    2. Subí el **CSV de productos de Tienda Nube**.
+    3. Revisá el cruce por SKU, costos, EAN y márgenes.
+    4. Editá únicamente **DISCOUNT_PERCENTAGE** o **FINAL_PRICE**.
+    5. Usá **Ver solo modificados** para revisar los cambios antes de descargar.
+    6. Descargá el archivo que corresponda:
+       - **Excel para Mercado Libre:** archivo final para subir a Mercado Libre.
+       - **Reporte interno:** archivo de control para revisar costos, márgenes y cambios.
+    """
+)
+st.warning(
+    "El Excel para Mercado Libre no incluye columnas internas como costo, margen o EAN. "
+    "Solo actualiza descuento, precio final y acción.",
+    icon="⚠️",
+)
+st.info("El reporte interno no se sube a Mercado Libre. Es solo para control y análisis.", icon="ℹ️")
+
+st.subheader("1. Carga de archivos")
 ml_file = st.file_uploader("Excel de promociones de Mercado Libre", type=["xlsx", "xls"])
 tn_file = st.file_uploader("CSV de productos de Tienda Nube", type=["csv"])
 
@@ -51,11 +72,12 @@ if tn_missing:
 merged_df = merge_ml_with_tienda_nube(ml_df, tn_df)
 metrics = build_metrics(merged_df)
 
+st.subheader("2. Métricas de cruce")
 metric_columns = st.columns(len(metrics))
 for column, (label, value) in zip(metric_columns, metrics.items()):
     column.metric(label, value)
 
-st.subheader("Publicaciones ML enriquecidas")
+st.subheader("3. Simulación de promociones")
 with st.container(border=True):
     st.markdown("**Filtros de la tabla principal**")
     search_col_1, search_col_2 = st.columns(2)
@@ -77,6 +99,17 @@ with st.container(border=True):
     only_without_cost = flag_col_2.checkbox("Ver solo productos sin costo")
     only_without_ean = flag_col_3.checkbox("Ver solo productos sin EAN")
     only_modified = flag_col_4.checkbox("Ver solo modificados")
+
+with st.expander("Leyenda de alertas de margen"):
+    st.markdown(
+        """
+        - **Sin cruce:** el SKU no fue encontrado en Tienda Nube.
+        - **Sin costo:** el producto cruzó, pero no tiene costo cargado.
+        - **Sin EAN:** el producto cruzó, pero no tiene código de barras.
+        - **Margen negativo:** el precio final queda por debajo del costo.
+        - **Margen bajo:** margen menor al 15%.
+        """
+    )
 
 filtered_df = merged_df.copy()
 if sku_query:
@@ -137,6 +170,11 @@ validation_errors = validate_editable_promotions(simulated_df)
 if validation_errors:
     st.warning("Hay valores inválidos en la simulación:\n\n- " + "\n- ".join(validation_errors))
 
+modified_rows_count = len(filter_modified_rows(simulated_df))
+st.metric("Publicaciones modificadas", modified_rows_count)
+if modified_rows_count == 0:
+    st.info("Todavía no modificaste ninguna publicación.")
+
 display_simulated_df = filter_modified_rows(simulated_df) if only_modified else simulated_df
 if only_modified:
     st.caption(f"Mostrando {len(display_simulated_df)} filas modificadas.")
@@ -149,34 +187,38 @@ if not simulated_df.equals(edited_df) or only_modified:
         hide_index=True,
     )
 
+st.subheader("4. Descargas")
 with st.container(border=True):
-    st.subheader("Exportación para Mercado Libre")
+    st.markdown("**Excel para Mercado Libre**")
     if not has_modified_rows(simulated_df):
         st.warning("No hay publicaciones modificadas para exportar.")
     try:
         export_bytes = export_mercado_libre_excel(ml_file.getvalue(), simulated_df)
         st.download_button(
-            "Descargar Excel para Mercado Libre",
+            "Descargar Excel para subir a Mercado Libre",
             data=export_bytes,
             file_name="promociones_ml_actualizadas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+        st.caption("Mantiene la plantilla original y solo modifica las columnas permitidas.")
     except Exception as exc:  # Streamlit debe informar problemas de exportación de forma amigable.
         st.error(f"No se pudo generar el Excel final para Mercado Libre: {exc}")
 
-    st.subheader("Reporte interno de control")
+    st.markdown("**Reporte interno de control**")
     try:
         internal_report_bytes = export_internal_report_excel(simulated_df)
         st.download_button(
-            "Descargar reporte interno",
+            "Descargar reporte interno de control",
             data=internal_report_bytes,
             file_name="reporte_interno_promociones.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+        st.caption("Incluye costo, EAN, margen, alertas y filas modificadas.")
     except Exception as exc:  # Streamlit debe informar problemas de exportación de forma amigable.
         st.error(f"No se pudo generar el reporte interno: {exc}")
 
-with st.expander("Vista previa técnica de archivos cargados"):
+st.subheader("5. Vista técnica")
+with st.expander("Vista técnica de archivos cargados"):
     st.caption("Vista técnica para revisar las primeras filas leídas sin formato ni filtros de la tabla principal.")
     st.write("Mercado Libre")
     st.dataframe(ml_df.head(20), use_container_width=True)
