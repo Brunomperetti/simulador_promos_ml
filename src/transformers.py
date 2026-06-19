@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src.loaders import ML_REQUIRED_COLUMNS, TN_COLUMN_ALIASES
+from src.ml_rows import filter_real_ml_publications
 from src.utils import add_normalized_sku, format_currency, format_percentage, format_plain_text, parse_optional_number
 
 OUTPUT_COLUMNS = [
@@ -93,7 +94,7 @@ def _ensure_columns(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
 
 def merge_ml_with_tienda_nube(ml_df: pd.DataFrame, tn_df: pd.DataFrame) -> pd.DataFrame:
     """Cruza Mercado Libre con Tienda Nube por SKU normalizado."""
-    ml_prepared = _ensure_columns(ml_df, ML_REQUIRED_COLUMNS)
+    ml_prepared = filter_real_ml_publications(_ensure_columns(ml_df, ML_REQUIRED_COLUMNS))
     tn_prepared = _ensure_columns(tn_df, list(TN_COLUMN_ALIASES.keys()))
 
     ml_prepared = add_normalized_sku(ml_prepared, "SKU")
