@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.exporter import export_mercado_libre_excel, has_modified_rows
+from src.exporter import export_internal_report_excel, export_mercado_libre_excel, has_modified_rows
 from src.loaders import load_mercado_libre_excel, load_tienda_nube_csv
 from src.transformers import (
     READ_ONLY_COLUMNS,
@@ -163,6 +163,18 @@ with st.container(border=True):
         )
     except Exception as exc:  # Streamlit debe informar problemas de exportación de forma amigable.
         st.error(f"No se pudo generar el Excel final para Mercado Libre: {exc}")
+
+    st.subheader("Reporte interno de control")
+    try:
+        internal_report_bytes = export_internal_report_excel(simulated_df)
+        st.download_button(
+            "Descargar reporte interno",
+            data=internal_report_bytes,
+            file_name="reporte_interno_promociones.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except Exception as exc:  # Streamlit debe informar problemas de exportación de forma amigable.
+        st.error(f"No se pudo generar el reporte interno: {exc}")
 
 with st.expander("Vista previa técnica de archivos cargados"):
     st.caption("Vista técnica para revisar las primeras filas leídas sin formato ni filtros de la tabla principal.")
